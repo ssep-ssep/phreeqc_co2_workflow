@@ -8,6 +8,6 @@ for p in parts:
     with io.open(os.path.join(B,p), encoding="utf-8") as f:
         buf.append(f.read())
 src="\n".join(buf)
-with io.open(os.path.join(B,"make_report.py"),"w",encoding="utf-8") as f:
+with io.open(os.path.join(B,"make_report.py"),"w",encoding="utf-8",newline="\n") as f:
     f.write(src)
 print("merged, chars:", len(src))
