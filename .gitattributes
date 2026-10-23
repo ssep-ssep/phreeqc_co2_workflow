@@ -1,0 +1,24 @@
+# =============================================================================
+#  换行符策略
+#  科学计算输入文件对空白/换行敏感，Windows 的 CRLF 转换会破坏 PHREEQC 输入，
+#  因此显式锁定 LF，优先于 core.autocrlf。
+# =============================================================================
+
+# 文本文件统一以 LF 存入仓库
+* text=auto eol=lf
+
+# PHREEQC 输入 / 数据库：必须 LF
+*.pqi  text eol=lf
+*.dat  text eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+
+# 二进制：禁止任何行尾/文本转换
+# （注意：phreeqc.dat 是文本数据库，已在上方按 eol=lf 处理，不要标 binary）
+*.exe  binary
+*.docx binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary

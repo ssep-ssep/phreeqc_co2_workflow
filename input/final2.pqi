@@ -1,0 +1,171 @@
+# 正式算例: 全部按 表压 + 1 atm 换算
+# 情形 1-N: 口径B 恒压 (气相压力由外界维持)
+SOLUTION 1
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 1
+    -fixed_pressure
+    -pressure   1.000000
+    CO2(g)      0.968940
+    H2O(g)      0.031060
+END
+
+SOLUTION 2
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 2
+    -fixed_pressure
+    -pressure   1.986923
+    CO2(g)      1.955863
+    H2O(g)      0.031060
+END
+
+SOLUTION 3
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 3
+    -fixed_pressure
+    -pressure   3.467308
+    CO2(g)      3.436248
+    H2O(g)      0.031060
+END
+
+SOLUTION 4
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 4
+    -fixed_pressure
+    -pressure   5.934616
+    CO2(g)      5.903556
+    H2O(g)      0.031060
+END
+
+SOLUTION 5
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 5
+    -fixed_pressure
+    -pressure   10.869233
+    CO2(g)      10.838173
+    H2O(g)      0.031060
+END
+
+SOLUTION 6
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 6
+    -fixed_pressure
+    -pressure   15.803849
+    CO2(g)      15.772789
+    H2O(g)      0.031060
+END
+
+SOLUTION 7
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 7
+    -fixed_pressure
+    -pressure   20.738465
+    CO2(g)      20.707405
+    H2O(g)      0.031060
+END
+
+# 情形 8-N: 口径A 定容 (充气后密封, 在下表的平衡分压下求解)
+SOLUTION 8
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 8
+    -fixed_pressure
+    -pressure   0.812444
+    CO2(g)      0.781384
+    H2O(g)      0.031060
+END
+
+SOLUTION 9
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 9
+    -fixed_pressure
+    -pressure   1.446037
+    CO2(g)      1.414977
+    H2O(g)      0.031060
+END
+
+SOLUTION 10
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 10
+    -fixed_pressure
+    -pressure   2.509036
+    CO2(g)      2.477976
+    H2O(g)      0.031060
+END
+
+SOLUTION 11
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 11
+    -fixed_pressure
+    -pressure   4.659702
+    CO2(g)      4.628642
+    H2O(g)      0.031060
+END
+
+SOLUTION 12
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 12
+    -fixed_pressure
+    -pressure   6.843559
+    CO2(g)      6.812499
+    H2O(g)      0.031060
+END
+
+SOLUTION 13
+    units       mol/L
+    temp        25
+    -water      1.0
+    K           0.2
+    Alkalinity  0.2  as HCO3
+GAS_PHASE 13
+    -fixed_pressure
+    -pressure   9.059551
+    CO2(g)      9.028491
+    H2O(g)      0.031060
+END
