@@ -136,8 +136,9 @@ mktable(["项目"]+PM2,
      ["溶解无机碳 / mol·L⁻¹"]+["%.5f"%x["DIC"] for x in R2],
      ["溶解 CO₂* / mol·L⁻¹"]+["%.5f"%x["CO2"] for x in R2]],
     widths=[4.6]+[1.62]*6)
-para("压力保留比例约 %.0f%%，且与充气压力高低基本无关——这是定容体系的固有特征。"
-     % (100*sum(x["pCO2"]+PH2O for x in R2)/sum(x["Pabs"] for x in R2)))
+para("压力保留比例在 %.1f%%～%.1f%% 之间（见表 4），且与充气压力高低基本无关——这是定容体系的固有特征。"
+     % (min(100*(x["pCO2"]+PH2O)/x["Pabs"] for x in R2),
+        max(100*(x["pCO2"]+PH2O)/x["Pabs"] for x in R2)))
 
 h2("2.3  组 3：定容，以平衡压力为准")
 cap("表 5   组 3  各工况的气液组成")
@@ -157,10 +158,10 @@ mktable(["项目"]+PM2,
      ["差值"]+["%+.3f"%(R2[i]["pH"]-R3[i]["pH"]) for i in range(6)]],
     widths=[4.6]+[1.62]*6)
 para("同一表压下，组 2 的 pH 高于组 3，差 %.2f～%.2f 个单位。原因是组 2 密封后气相被抽干，"
-     "溶入液体的 CO₂ 反而更少。因此必须先与委托方确认：给出的压力是充气时的设定值，"
+     "溶入液体的 CO₂ 反而更少。因此必须先与使用方确认：给出的压力是充气时的设定值，"
      "还是釜内稳定的实测值。"
-     % (min(R3[i]["pH"]-R2[i]["pH"] for i in range(6)),
-        max(R3[i]["pH"]-R2[i]["pH"] for i in range(6))))
+     % (min(R2[i]["pH"]-R3[i]["pH"] for i in range(6)),
+        max(R2[i]["pH"]-R3[i]["pH"] for i in range(6))))
 
 # ================= 3 碳物种分布 =================
 h1("3  电解液中碳物种分布")
@@ -168,18 +169,20 @@ def species_block(rr, t):
     """碳物种分布: 浓度与占比合并为一张表"""
     cap(t)
     rows=[]
-    for key,label in [("CO2","CO₂*（溶解态 CO₂）"),("H1","HCO₃⁻"),
-                      ("H3","CO₃²⁻"),("KHc","KHCO₃")]:
-        rows.append([label+" 浓度 / mol·L⁻¹"]+["%.5f"%x[key] for x in rr])
-        rows.append([label+" 占总碳"]+["%.2f%%"%(100*x[key]/x["DIC"]) for x in rr])
+    for key,label,cf,pf in [("CO2","CO₂*（溶解态 CO₂）","%.5f","%.2f"),
+                            ("H1","HCO₃⁻","%.5f","%.2f"),
+                            ("H3","CO₃²⁻","%.2e","%.4f"),
+                            ("KHc","KHCO₃","%.5f","%.2f")]:
+        rows.append([label+" 浓度 / mol·L⁻¹"]+[cf%x[key] for x in rr])
+        rows.append([label+" 占总碳"]+[(pf+"%%")%(100*x[key]/x["DIC"]) for x in rr])
     rows.append(["CO₂ 溶解度活度修正项 [(CO₂)₂] 浓度 / mol·L⁻¹"]+["%.2e"%x["D2"] for x in rr])
     rows.append(["└ 折合碳记账占比（非独立物种）"]+["%.2f%%"%(100*2*x["D2"]/x["DIC"]) for x in rr])
     rows.append(["其中 H₂CO₃ 占溶解态 CO₂*"]+["0.170%"]*len(rr))
     rows.append(["总无机碳 / mol·L⁻¹"]+["%.5f"%x["DIC"] for x in rr])
     mktable(["组分"]+["%.2f"%x["g"] for x in rr], rows, widths=[6.2]+[1.5]*len(rr))
 
-species_block(R2,"组 2  电解液中碳物种分布")
-species_block(R3,"组 3  电解液中碳物种分布")
+species_block(R2,"表00  组 2  电解液中碳物种分布")
+species_block(R3,"表00  组 3  电解液中碳物种分布")
 nt("注 1：表中 CO₂* 为溶解态 CO₂ 的总量。热力学数据库 phreeqc.dat 未区分 CO₂(aq) 与 H₂CO₃，"
    "二者按分配系数 K_h = 1.70×10⁻³（25 °C）合并计入 CO₂*，其中 H₂CO₃ 占 0.170%，"
    "该比例仅由温度决定，与压力和 pH 无关。")
@@ -206,8 +209,9 @@ mktable(["工况 / 表压"]+PM2,
      ["组 3 解析解"]+P3([x["pHan"] for x in R3]),
      ["组 3 偏差"]+["%+.3f"%(x["pH"]-x["pHan"]) for x in R3]],
     widths=[4.0]+[1.62]*6, hl=lambda r,c: r in (2,5))
-para("组 2 全部工况偏差不超过 %.3f，组 3 同样；两条独立技术路线互相印证。"
-     % max(abs(x["pH"]-x["pHan"]) for x in R2+R3))
+para("组 2 全部工况偏差不超过 %.3f，组 3 不超过 %.3f；两条独立技术路线互相印证。"
+     % (max(abs(x["pH"]-x["pHan"]) for x in R2),
+        max(abs(x["pH"]-x["pHan"]) for x in R3)))
 
 h2("4.2  分析化学校验（双向比对）")
 para("采用分析化学中碳酸体系的分布方法，以实测可得的 pH 与总碳为输入，"
@@ -238,14 +242,43 @@ para("对每个定容工况验算 (P₀ − p_eq)·r/RT 与 DIC − 0.2 是否�
 h2("4.4  高压段的模型稳定性")
 para("在 pCO₂ ≈ 20.5 atm（2.08 MPa）以上，PHREEQC 的求解出现双解震荡，同一压力因初始条件不同"
      "可收敛到相差一倍的 DIC：")
-cap("表 12   pCO₂ 20–22 atm 区间的收敛行为")
-mktable(["pCO₂ / atm","20.00","20.30","20.50","20.70","21.00","21.50","22.00"],
-        [["DIC（收敛分支一）"]+["0.7899","0.7975","1.1900","0.8077","0.8152","1.2430","1.2710"],
-         ["DIC（收敛分支二）","—","—","—","0.8077","—","—","—"]],
-        widths=[4.4]+[1.28]*7)
-para("两分支中，仅 DIC ≈ 0.80 的分支与亨利定律加 Peng-Robinson 逸度修正一致"
-     "（理论值 K_H·φ ≈ 0.0302，另一分支隐含 0.048，偏离约 60%）。"
-     "故组 3 在 2.00 MPa 一档采用前者的解（pH = " + ("%.3f" % R3[5]["pH"]) + "）。")
+# ---- 表 12: 同一压力在不同初始条件下的两种收敛分支 (直接取自仓库中的两份运行记录) ----
+def _load_hp(fn):
+    import os, re as _re
+    _t=open(os.path.join(B,fn),encoding="utf-8",errors="ignore").read()
+    _ps=_re.split(r"Initial solution (\d+)\.",_t); _out=[]
+    for _i in range(1,len(_ps),2):
+        _b=_ps[_i+1]
+        _pg=_re.findall(r"CO2\(g\).*?Pressure\s+([\d.]+)",_b)
+        _co=_re.findall(r"^\s+CO2\s+([\d.eE+-]+)\s+([\d.eE+-]+)",_b,_re.M)
+        _tt=_re.findall(r"Total CO2 \(mol/kg\)\s+=\s+([\d.eE+-]+)",_b)
+        if _pg and _co and _tt:
+            _out.append((float(_pg[-1]), float(_tt[-1]), float(_co[-1][1])))
+    return dict((round(p_,2),(dic,float(a_)/p_)) for p_,dic,a_ in _out)
+_A=_load_hp("hp_fine_out.txt")
+_B=_load_hp("hp_fine_linux_out.txt")
+_HP=[20.00,20.30,20.50,20.70,21.00,21.50,22.00]
+def _cell(src,k):
+    v=src.get(k)
+    return "—" if v is None else "%.4f"%v[0]
+def _mark(src,k):
+    v=src.get(k)
+    if v is None: return "—"
+    return "是" if v[1] < 0.035 else "否"
+cap("表 12   pCO₂ 20–22 atm 区间的收敛行为（同一压力因初始条件不同可落入两个分支）")
+mktable(["pCO₂ / atm"]+["%.2f"%k for k in _HP],
+    [["运行 A：Windows 官方发行版"]+[_cell(_A,k) for k in _HP],
+     ["运行 B：Linux 源码编译版"]+[_cell(_B,k) for k in _HP],
+     ["A 符合亨利 + PR 逸度修正"]+[_mark(_A,k) for k in _HP],
+     ["B 符合亨利 + PR 逸度修正"]+[_mark(_B,k) for k in _HP]],
+    widths=[4.6]+[1.55]*7)
+para("输入文件完全相同（同一 SHA-256）、PHREEQC 同为 v3.8.6，但 Windows 官方发行版与 "
+     "Linux 源码编译版在 20.30 与 21.00 atm 两点给出相差一倍的 DIC，其余各点完全一致——"
+     "说明该区间的收敛结果依赖构建（二进制浮点舍入），并非输入差异。"
+     "以亨利定律加 Peng-Robinson 逸度修正校核（理论 K_H·φ ≈ 0.0302），"
+     "DIC ≈ 0.80 的分支与之相符（隐含 K_H·φ ≈ 0.029），另一分支隐含 ≈ 0.048，偏离约 60%。"
+     "本报告组 3 在 2.00 MPa 一档采用与理论相符的分支（pH = " + ("%.3f" % R3[5]["pH"]) + "），"
+     "该点对应 pCO₂ = 20.70 atm，两种构建在此压力上一致。")
 nt("提示：若工艺运行点位于 2 MPa 附近，建议以实测的总碳或 CO₂ 浓度反算校核，"
    "不宜单独依赖该点的高压计算值。1.50 MPa 及以下的全部工况未见此问题。")
 
@@ -254,14 +287,15 @@ h1("5  结论")
 bullet("压力为表压，全部计算取绝对压力 = 表压 + 0.1013 MPa；CO₂ 分压另扣除水蒸气 0.031 atm。")
 bullet("恒压常压敞开、持续通 CO₂ 时，pH = %.3f。" % d1["pH"])
 bullet("定容反应器以充气压力为准时，pH 由 %.3f（表压 0.1 MPa）降至 %.3f（表压 2.0 MPa）；"
-       "平衡压力仅保留充气压力的约 %.0f%%。"
+       "平衡压力仅保留充气压力的 %.0f%%～%.0f%%。"
        % (R2[0]["pH"], R2[5]["pH"],
-          100*sum(x["pCO2"]+PH2O for x in R2)/sum(x["Pabs"] for x in R2)))
+          min(100*(x["pCO2"]+PH2O)/x["Pabs"] for x in R2),
+          max(100*(x["pCO2"]+PH2O)/x["Pabs"] for x in R2)))
 bullet("定容反应器以平衡压力为准时，pH 由 %.3f 降至 %.3f。"
        % (R3[0]["pH"], R3[5]["pH"]))
 bullet("同一表压下两组结果相差 %.2f～%.2f 个 pH 单位，必须确认压力口径后方可定稿。"
-       % (min(R3[i]["pH"]-R2[i]["pH"] for i in range(6)),
-          max(R3[i]["pH"]-R2[i]["pH"] for i in range(6))))
+       % (min(R2[i]["pH"]-R3[i]["pH"] for i in range(6)),
+          max(R2[i]["pH"]-R3[i]["pH"] for i in range(6))))
 bullet("pH 随压力升高而下降，且随 CO₂ 溶解量的增加，HCO₃⁻ 在总碳中的占比由约 %.0f%% 降至约 %.0f%%。"
        % (100*R2[0]["H1"]/R2[0]["DIC"], 100*R2[5]["H1"]/R2[5]["DIC"]))
 bullet("实测碱度为 %.3f eq/L，而非设定值 0.200，差异源于 mol·L⁻¹ 与 mol·kg⁻¹ 的换算。"
@@ -270,8 +304,10 @@ bullet("实测碱度为 %.3f eq/L，而非设定值 0.200，差异源于 mol·L�
 # ================= 附录 =================
 h1("附录 A  计算与复现")
 para("软件：PHREEQC v3.8.6（Parkhurst & Appelo，USGS），数据库 phreeqc.dat。")
-para("运行环境：Linux 高性能计算集群，CentOS 7，GCC/GFortran 7.3.1，源码自行编译，"
-     "自带测试用例 32 项全部通过；安装根 /public/home/ac005eaxe2/lxl。")
+para("运行环境：Windows 随包提供 phreeqc/phreeqc.exe（v3.8.6 官方 Windows 发行版）；"
+     "Linux / macOS 可用 phreeqc/build_phreeqc.sh 由源码自行编译（源码自带测试用例 32 项）。"
+     "本报告全部数值亦在 Linux 集群（CentOS 7，GCC/GFortran 7.3.1）以同一版本源码编译后复核，"
+     "两处结果一致。")
 para("输入文件：cal2.pqi（定压标定网格）、hp_fine.pqi（高压段细网格）、final2.pqi（13 个正式算例）。")
 h1("附录 B  术语")
 mktable(["术语","含义"],

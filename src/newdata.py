@@ -32,13 +32,19 @@ for i in range(1,len(parts),2):
         if m: d[k]=(float(m[-1][0]),float(m[-1][1]))
     ph=re.findall(r"([\d.]+)\s+Charge balance",b)
     pg=re.findall(r"CO2\(g\).*?Pressure\s+([\d.]+)",b)
+    tt=re.findall(r"Total CO2 \(mol/kg\)\s+=\s+([\d.eE+-]+)",b)
     if ph and d:
         d["pH"]=float(ph[-1]); d["pCO2"]=float(pg[-1]) if pg else 0.0
+        d["TOT"]=float(tt[-1]) if tt else None
         S.append(d)
 
 def enrich(d):
+    # H2CO3 已由 PHREEQC 合并进表观物种 CO2*; 此处只作拆分比例参考, 不再计入总碳
     d["H2"]=d["CO2"][0]*KH
-    d["DIC"]=d["CO2"][0]+d["H1"][0]+d["H3"][0]+d["KH"][0]+2*d["D2"][0]+d["H2"]
+    # 总无机碳 = 物种和 (含 (CO2)2 的两个碳), 与 PHREEQC 的 "Total CO2" 一致
+    # 总无机碳 = 物种和 (含 (CO2)2 的两个碳); 不再额外计入 H2CO3 (已并入表观 CO2*)
+    # 用物种和而非 PHREEQC 打印的 "Total CO2", 因后者只有 4 位有效数字
+    d["DIC"]=d["CO2"][0]+d["H1"][0]+d["H3"][0]+d["KH"][0]+2*d["D2"][0]
     d["Alk"]=d["H1"][0]+2*d["H3"][0]+d["OH"][0]-d["H"][0]
     return d
 for d in S: enrich(d)

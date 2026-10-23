@@ -49,9 +49,10 @@ def run_phreeqc(exe):
             print("     [错误] 输入文件不存在: %s" % src)
             return False
         try:
-            r = subprocess.run([exe, src, dst, db], capture_output=True,
+            r = subprocess.run([exe, os.path.join("input", inp),
+                                os.path.join("output", out), db], capture_output=True,
                                text=True, encoding="utf-8", errors="replace",
-                               timeout=300, stdin=subprocess.DEVNULL)
+                               timeout=300, stdin=subprocess.DEVNULL, cwd=PKG)
         except subprocess.TimeoutExpired:
             print("     [错误] PHREEQC 超时 (300 s), 通常是输出目录缺失或参数有误")
             return False

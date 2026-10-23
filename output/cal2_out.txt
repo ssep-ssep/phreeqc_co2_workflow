@@ -1,5 +1,5 @@
-   Input file: D:\workspace\phreeqc_co2_workflow\input\cal2.pqi
-  Output file: D:\workspace\phreeqc_co2_workflow\output\cal2_out.txt
+   Input file: input\cal2.pqi
+  Output file: output\cal2_out.txt
 Database file: D:\workspace\phreeqc_co2_workflow\phreeqc\phreeqc.dat
 
 ------------------
@@ -4559,7 +4559,7 @@ End of simulation.
 Reading input data for simulation 27.
 -------------------------------------
 
-------------------------------
-End of Run after 0.02 Seconds.
-------------------------------
+-------------------------------
+End of Run after 0.026 Seconds.
+-------------------------------
 
