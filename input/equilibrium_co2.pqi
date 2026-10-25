@@ -1,0 +1,138 @@
+
+SELECTED_OUTPUT 1
+    -file output/equilibrium_co2.tsv
+    -high_precision true
+    -reset false
+    -simulation true
+    -solution true
+    -state true
+    -pH true
+    -alkalinity true
+    -ionic_strength true
+    -water true
+    -charge_balance true
+    -percent_error true
+    -totals C K Nti
+    -molalities CO2 HCO3- CO3-2 KHCO3 (CO2)2 H+ OH- NtiO2- HNtiO2
+    -activities H+ CO2 HCO3- CO3-2
+    -equilibrium_phases CO2(g)
+    -saturation_indices CO2(g)
+USER_PUNCH 1
+    -headings solution_volume_L water_activity phi_CO2 inferred_pCO2_atm
+    -start
+    10 phi = PR_PHI("CO2(g)")
+    20 IF phi <= 0 THEN phi = 1
+    30 PUNCH SOLN_VOL, ACT("H2O"), phi, 10^SI("CO2(g)")/phi
+    -end
+
+TITLE gauge=0 MPa
+SOLUTION 1
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 1
+    1
+EQUILIBRIUM_PHASES 1
+    CO2(g) -0.01370311508100605 100.0
+    -force_equality true
+END
+
+TITLE gauge=0.1 MPa
+SOLUTION 2
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 2
+    1.986923266716013
+EQUILIBRIUM_PHASES 2
+    CO2(g) 0.2913384902335977 100.0
+    -force_equality true
+END
+
+TITLE gauge=0.25 MPa
+SOLUTION 3
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 3
+    3.467308166790032
+EQUILIBRIUM_PHASES 3
+    CO2(g) 0.5360845211590736 100.0
+    -force_equality true
+END
+
+TITLE gauge=0.5 MPa
+SOLUTION 4
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 4
+    5.934616333580064
+EQUILIBRIUM_PHASES 4
+    CO2(g) 0.771113711769244 100.0
+    -force_equality true
+END
+
+TITLE gauge=1 MPa
+SOLUTION 5
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 5
+    10.86923266716013
+EQUILIBRIUM_PHASES 5
+    CO2(g) 1.034956065646432 100.0
+    -force_equality true
+END
+
+TITLE gauge=1.5 MPa
+SOLUTION 6
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 6
+    15.80384900074019
+EQUILIBRIUM_PHASES 6
+    CO2(g) 1.197908493616577 100.0
+    -force_equality true
+END
+
+TITLE gauge=2 MPa
+SOLUTION 7
+    temp 25
+    pressure 1
+    units mol/L
+    pH 8.3
+    K 0.2
+    Alkalinity 0.2 as HCO3
+    -water 1
+REACTION_PRESSURE 7
+    20.73846533432026
+EQUILIBRIUM_PHASES 7
+    CO2(g) 1.316125684621024 100.0
+    -force_equality true
+END

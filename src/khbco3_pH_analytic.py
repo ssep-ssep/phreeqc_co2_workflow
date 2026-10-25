@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-0.2 mol/kg KHCO3 水溶液与不同压力 CO2 平衡时的 pH
-====================================================
-独立解析求解（不依赖 PHREEQC），含：
-  * 碳酸体系全部平衡 + 电荷平衡 + 质量守恒
-  * Davies 活度系数（I ~ 0.2 mol/kg）
-  * Peng-Robinson 方程计算 CO2 逸度系数（>1 MPa 时显著偏离理想气体）
-  * 温度对 pKa1 / pKa2 / Kw / Henry 常数的影响（van't Hoff）
+khbco3_pH_analytic.py —— 独立解析解 (不依赖 PHREEQC)
+
+用于与 PHREEQC 结果交叉核对, 故与 PHREEQC 保持同一记账口径:
+  * 基准: mol/kg water (活度系数的自然基准); PHREEQC 的 mol/L 输入需先换算
+  * 总碱度 (carbonate alkalinity)、总 K+、离子强度 I 三者分开处理:
+    I 由各物种电荷实时迭代求出, 不用碱度代替
+  * 气体参数是 **CO2 分压** (atm), 不是总压
+
+修正记录 (2026-10-24 代码审查):
+  - van't Hoff 符号: ln[K(T)/K(T0)] = -dH/R*(1/T - 1/T0)。原式用 +dH/R*(1/T-1/T0),
+    对吸热反应会使 K 随温度升高而减小, 方向反了。T = T0 = 25 C 时两者相同, 此前结果不受影响。
+  - 离子强度不再用碱度代替, 改为由物种电荷迭代。
+  - 函数参数由总压改为 CO2 分压。
 """
 import math
 
@@ -26,61 +32,91 @@ def A_DH(Tc):
     return 0.45
 
 def consts(T):
-    return dict(
-        K1 = 10**-pK1_0 * math.exp( dH1/R*(1/T - 1/T0)),
-        K2 = 10**-pK2_0 * math.exp( dH2/R*(1/T - 1/T0)),
-        Kw = 10**-pKw_0 * math.exp(dHKw/R*(1/T - 1/T0)),
-        KH = KH_0      * math.exp( dHK/R*(1/T - 1/T0)))
+    """25 C 为基准, 按 van't Hoff 外推到 T"""
+    def vh(dH):
+        return math.exp(-dH/R*(1/T - 1/T0))
+    return dict(K1 = 10**-pK1_0 * vh(dH1),
+                K2 = 10**-pK2_0 * vh(dH2),
+                Kw = 10**-pKw_0 * vh(dHKw),
+                KH = KH_0       * vh(dHK))
 
 def lgamm(z, I, A):
     return -A*z*z*(math.sqrt(I)/(1+math.sqrt(I)) - 0.3*I)
 
-def pr_phi(T, Pbar):
-    """Peng-Robinson 纯组分 CO2 逸度系数"""
+def pr_phi(T, P_atm):
+    """Peng-Robinson 纯组分 CO2 逸度系数, 输入压力单位 atm"""
+    P_bar = P_atm * 1.01325
     Tc, Pc, w = 304.1282, 73.773, 0.22394
-    Tr, Pr = T/Tc, Pbar/Pc
+    Tr, Pr = T/Tc, P_bar/Pc
     kappa = 0.37464 + 1.54226*w - 0.26992*w*w
     alpha = (1 + kappa*(1 - math.sqrt(Tr)))**2
     Aa = alpha*0.45724*Pr/Tr/Tr
     Bb = 0.07780*Pr/Tr
-    c2, c1, c0 = -(1-Bb), Aa-3*Bb*Bb-2*Bb, -(Aa*Bb-Bb*Bb-Bb**3)
+    c2 = -(1-Bb); c1 = Aa-3*Bb*Bb-2*Bb; c0 = -(Aa*Bb-Bb*Bb-Bb**3)
     z = 1.0
     for _ in range(300):
-        f  = z*z*z + c2*z*z + c1*z + c0
+        f = z*z*z + c2*z*z + c1*z + c0
         df = 3*z*z + 2*c2*z + c1
         z -= f/df
     s2 = math.sqrt(2)
     lnf = (z-1) - math.log(z-Bb) - Aa/(2*s2*Bb)*math.log((z+(1+s2)*Bb)/(z+(1-s2)*Bb))
     return math.exp(lnf)
 
-def newton(f, x0):
+def _newton(f, x0, tol=1e-16):
     x = x0
-    for _ in range(300):
+    for _ in range(400):
         d = max(abs(x), 1e-14)*1e-8
         f0, f1 = f(x), f(x+d)
+        if f1 == f0: break
         x -= f0*d/(f1-f0)
+        if abs(f0*d/(f1-f0)) < tol: break
     return x
 
-def pH_open(T, P_MPa, activity=True, fugacity=True, alk=0.2):
-    """开口体系：碱度固定为 alk, 与 pCO2 达到平衡"""
+def pH_open(T, p_co2_atm, alk_kgw=0.2, k_kgw=None, nitrite=0.0,
+            activity=True, fugacity=True, pka_hno2=3.16):
+    """恒压 (规定 CO2 分压) 体系的平衡 pH。
+
+    参数
+      p_co2_atm  平衡 CO2 分压 (atm) —— 不是总压
+      alk_kgw    碳酸盐总碱度 (mol/kg water)
+      k_kgw      总 K+ (mol/kg water);  缺省等于 alk_kgw (纯 KHCO3)
+      nitrite    总亚硝酸盐 (mol/kg water), 0 表示不加盐
+    """
     K = consts(T)
-    Pbar = P_MPa*10.0
-    phi  = pr_phi(T, Pbar) if fugacity else 1.0
-    aCO2 = K['KH'] * phi * Pbar/1.01325          # 溶解 CO2* 的活度(中性, gamma~1)
-    A    = A_DH(T-273.15)
-    g1 = 10**lgamm(1, alk, A) if activity else 1.0
-    g2 = 10**lgamm(2, alk, A) if activity else 1.0
-    def cb(x):                                     # x = a_H+
-        HCO3 = K['K1']*aCO2/x/g1
-        CO3  = K['K2']*K['K1']*aCO2/(x*x)/g2
-        OH   = K['Kw']/x/g1
-        return x/g1 + alk - HCO3 - 2*CO3 - OH
-    aH  = newton(cb, 1e-7)
-    return dict(pH=-math.log10(aH), phi=phi, CO2=aCO2,
-                HCO3=K['K1']*aCO2/aH/g1, CO3=K['K2']*K['K1']*aCO2/(aH*aH)/g2)
+    A = A_DH(T-273.15)
+    if k_kgw is None:
+        k_kgw = alk_kgw
+    phi = pr_phi(T, p_co2_atm) if fugacity else 1.0
+    aCO2 = K['KH'] * phi * p_co2_atm          # 溶解 CO2* 的活度 (中性, gamma ~ 1)
+    ka_no2 = 10**-pka_hno2
+
+    def species(aH, g1, g2):
+        H    = aH/g1
+        OH   = K['Kw']/aH/g1
+        HCO3 = K['K1']*aCO2/aH/g1
+        CO3  = K['K2']*K['K1']*aCO2/(aH*aH)/g2
+        no2  = nitrite/(1 + aH*g1/ka_no2) if nitrite else 0.0
+        hn   = nitrite - no2
+        I = 0.5*(k_kgw + H + OH + HCO3 + 4*CO3 + no2)
+        return H, OH, HCO3, CO3, no2, hn, I
+
+    I = max(alk_kgw, 1e-6)
+    for _ in range(200):
+        g1 = 10**lgamm(1, I, A) if activity else 1.0
+        g2 = 10**lgamm(2, I, A) if activity else 1.0
+        def cb(aH):
+            H, OH, HCO3, CO3, no2, hn, I_ = species(aH, g1, g2)
+            return (k_kgw + H) - (HCO3 + 2*CO3 + OH + no2)
+        aH = _newton(cb, 1e-7)
+        H, OH, HCO3, CO3, no2, hn, I_new = species(aH, g1, g2)
+        if abs(I_new - I) < 1e-13:
+            I = I_new; break
+        I = 0.5*(I_new + I)
+    return dict(pH=-math.log10(aH), phi=phi, CO2=aCO2, I=I,
+                HCO3=HCO3, CO3=CO3, OH=OH, HNO2=hn, aH=aH)
 
 def pH_closed(T, CT=0.2, activity=True):
-    """封闭体系：碳总量固定 CT, 无气体"""
+    """封闭体系 (无 CO2 交换): 碳总量固定, 作参照"""
     K = consts(T)
     A = A_DH(T-273.15)
     g1 = 10**lgamm(1, CT, A) if activity else 1.0
@@ -90,20 +126,13 @@ def pH_closed(T, CT=0.2, activity=True):
         b  = (CT - H - OH)/(1 + 2*K['K2']/aH)
         co2 = CT - b - K['K2']*b/aH
         return K['K1'] - aH*g1*b/co2
-    return -math.log10(newton(f, 4.5e-9))
-
-PRESS = [0.1, 0.25, 0.5, 1.0, 1.5, 2.0]
+    return -math.log10(_newton(f, 4.5e-9))
 
 if __name__ == "__main__":
-    print("0.2 mol/kg KHCO3 与 CO2 气相平衡的 pH")
-    print("参考点校核: 25 C 密封瓶(无 CO2) pH = %.2f  (文献 ~8.3)" % pH_closed(298.15))
-    print("            25 C 纯水与 1 atm CO2 平衡 pH ~ 3.9")
-    for Tc in (15.0, 25.0, 40.0):
-        T = Tc + 273.15
-        print("\n--- T = %.0f C ---" % Tc)
-        print("%9s %9s %9s %9s %9s %8s" % ("P/MPa","pH(理想)","pH(Davies)","pH(+PR)","phi","CO2*/M"))
-        for P in PRESS:
-            a = pH_open(T, P, False, False)
-            b = pH_open(T, P, True,  False)
-            c = pH_open(T, P, True,  True)
-            print("%9.2f %9.2f %9.2f %9.2f %9.3f %8.4f" % (P, a['pH'], b['pH'], c['pH'], c['phi'], c['CO2']))
+    print("独立解析解自检 (0.2 mol/kg KHCO3, 25 C)")
+    print("  封闭体系 (无 CO2) pH = %.2f   (文献 ~8.3)" % pH_closed(298.15))
+    print()
+    print("%10s %10s %10s %10s" % ("pCO2/atm", "pH", "I/mol/kg", "phi"))
+    for p in (0.969, 1.956, 3.436, 5.904, 10.838, 15.773, 20.707):
+        r = pH_open(298.15, p)
+        print("%10.3f %10.4f %10.5f %10.4f" % (p, r["pH"], r["I"], r["phi"]))

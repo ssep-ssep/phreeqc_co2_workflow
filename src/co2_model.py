@@ -1,144 +1,181 @@
 # -*- coding: utf-8 -*-
-"""co2_model.py —— 0.2 M KHCO3 / CO2 气液平衡模型 (PHREEQC 结果解析 + 交叉校验)
-
-提供:
-  * load_outputs()      解析 PHREEQC 输出, 返回每算例的物种与 pH
-  * enrich()            补算 DIC / 碱度 / H2CO3 拆分
-  * recon()             分析化学校验: 由 pH 与总碳反算各组分
-  * analytic_const()    独立解析解 (恒压 / 指定平衡分压)
-  * analytic_sealed()   独立解析解 (定容, 含容器碳守恒)
-  * GROUPS              三种工况的算例分组
 """
-import os, re, math, importlib.util, sys
+co2_model.py —— PHREEQC 结果的读取与交叉核对原语
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+数据来源: PHREEQC 的 SELECTED_OUTPUT (-high_precision true) 生成的 TSV,
+不解析格式化文本, 避免有效数字损失。
+
+单位口径:
+  * PHREEQC 原生输出为 molality (mol/kg water); 报告同时给出 mol/L,
+    换算因子 factor = mass_H2O / solution_volume_L
+  * 碱度: 直接采用 PHREEQC 输出的 Alk, 并用完整物种求和交叉核对
+    (含中性络合物 KHCO3 的一个当量; 若加入 HNO2 则再减去其质子化部分)
+
+修正记录 (2026-10-24 代码审查):
+  - 删除"最高压力点用邻近算例替换"的做法: 现在用 EQUILIBRIUM_PHASES 直接规定
+    平衡 CO2 分压, 气相留足余量, 边界总是可达, 无需挑选分支
+  - 碱度求和补入 KHCO3
+  - 物种浓度标注为 molality 并另给 mol/L
+"""
+import os, csv, math, sys
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG  = os.path.dirname(HERE)
 OUT  = os.path.join(PKG, "output")
 
-# ---- 常数 ----
-KH      = 1.70e-3        # H2CO3 / CO2(aq) 水合分配系数 (25 C)
-RATIO   = 0.6            # V气 / V液
-RT      = 0.082057*298.15
-MPA2ATM = 1/0.101325     # 1 MPa = 9.86923 atm
-PATM    = 1.0            # 当地大气压 (atm)
-PH2O    = 0.03106        # 水蒸气分压 (atm, 25 C)
-GAUGE   = [0.10, 0.25, 0.50, 1.00, 1.50, 2.00]   # 表压档位 (MPa)
-ABS     = {g: g*MPA2ATM + PATM for g in GAUGE}   # 绝对压力 (atm)
-ABS[0.0] = PATM
+GAUGE = [0.00, 0.10, 0.25, 0.50, 1.00, 1.50, 2.00]   # 表压 MPa
+ATM_MPA   = 0.101325
+P_ATM     = 1.0        # 当地大气压 (atm)
+H2O_ATM   = 0.03106    # 25 C 水蒸气分压 (atm)
+R_GAS     = 0.082057 * 298.15   # L atm / mol
+RATIO     = 0.6        # V_G / V_L (定容工况)
 
-# ---- PHREEQC 物种表正则 ----
-SPEC = [("CO2", r"^\s+CO2\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("D2",  r"^\s+\(CO2\)2\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("H1",  r"^\s+HCO3-\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("H3",  r"^\s+CO3-2\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("KH",  r"^\s+KHCO3\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("OH",  r"^\s+OH-\s+([\d.eE+-]+)\s+([\d.eE+-]+)"),
-        ("H",   r"^\s+H\+\s+([\d.eE+-]+)\s+([\d.eE+-]+)")]
+SPECIES = ["CO2", "HCO3-", "CO3-2", "KHCO3", "(CO2)2", "H+", "OH-", "NtiO2-", "HNtiO2"]
 
-def _load_module(name, path):
+class Case(object):
+    """一个平衡工况"""
+
+    def __init__(self, row, gauge_mpa):
+        f = lambda k: float(row.get(k) or 0.0)
+        self.gauge_mpa  = gauge_mpa
+        self.p_abs_mpa  = gauge_mpa + P_ATM * ATM_MPA
+        self.p_co2_atm  = f("inferred_pCO2_atm")
+        self.p_co2_target_atm = (P_ATM + gauge_mpa / ATM_MPA) - H2O_ATM
+        self.pH         = f("pH")
+        self.Alk        = f("Alk")            # eq/kg water
+        self.I          = f("mu")
+        self.pct_err    = f("pct_err")
+        self.mass_H2O   = f("mass_H2O")
+        self.soln_vol_L = f("solution_volume_L")
+        self.phi        = f("phi_CO2")
+        self.totals     = {k: f(k) for k in ("C", "K", "Nti")}
+        self.m          = {k: f("m_" + k) for k in SPECIES}
+        self.a          = {k: f("a_" + k) for k in ("H+", "CO2", "HCO3-", "CO3-2")}
+        self.gas_dCO2   = f("d_CO2(g)")
+        self.factor     = (self.mass_H2O / self.soln_vol_L) if self.soln_vol_L else 1.0
+
+    def M(self, sp):
+        """mol/L"""
+        return self.m[sp] * self.factor
+
+    def m(self, sp):
+        """mol/kg water"""
+        return self.m[sp]
+
+    def alk_species(self):
+        """完整物种求和的碱度 (eq/kg water)"""
+        return (self.m["HCO3-"] + 2*self.m["CO3-2"] + self.m["KHCO3"]
+                + self.m["OH-"] - self.m["H+"] - self.m["HNtiO2"])
+
+    def carbon_species(self):
+        """完整物种求和的总碳 (mol/kg water)"""
+        return (self.m["CO2"] + self.m["HCO3-"] + self.m["CO3-2"]
+                + self.m["KHCO3"] + 2*self.m["(CO2)2"])
+
+    def alk_M(self):
+        return self.Alk * self.factor
+
+    def DIC_M(self):
+        return self.totals["C"] * self.factor
+
+    def summary(self):
+        return dict(gauge=self.gauge_mpa, p_abs=self.p_abs_mpa,
+                    p_co2=self.p_co2_atm, pH=self.pH, Alk=self.Alk, I=self.I,
+                    DIC=self.DIC_M(), CO2=self.M("CO2"), HCO3=self.M("HCO3-"),
+                    CO3=self.M("CO3-2"), KHCO3=self.M("KHCO3"),
+                    D2=self.M("(CO2)2"), OH=self.M("OH-"), H=self.M("H+"))
+
+
+def read_tsv(path):
+    """读 SELECTED_OUTPUT 的 TSV, 返回 (表头, 行字典列表)"""
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        rows = list(csv.reader(f, delimiter="\t"))
+    if not rows:
+        return [], []
+    head = [h.strip() for h in rows[0]]
+    out = []
+    for r in rows[1:]:
+        if not any(x.strip() for x in r):
+            continue
+        out.append(dict(zip(head, [x.strip() for x in r])))
+    return head, out
+
+
+def load_case(tsv_name, gauges=None):
+    """读一个算例文件的 react 状态, 返回 Case 列表"""
+    path = tsv_name if os.path.isabs(tsv_name) else os.path.join(OUT, tsv_name)
+    head, rows = read_tsv(path)
+    react = [r for r in rows if r.get("state") == "react"]
+    gauges = gauges or GAUGE
+    if len(react) != len(gauges):
+        raise RuntimeError("%s: 期望 %d 个平衡状态, 实得 %d"
+                           % (tsv_name, len(gauges), len(react)))
+    return [Case(r, g) for r, g in zip(react, gauges)]
+
+
+def load_initial(tsv_name):
+    """读 i_soln 状态 (初始解), 用于质量守恒核对"""
+    path = tsv_name if os.path.isabs(tsv_name) else os.path.join(OUT, tsv_name)
+    head, rows = read_tsv(path)
+    return [r for r in rows if r.get("state") == "i_soln"]
+
+
+# --------------------------------------------------------------------------
+# 独立解析解 (交叉核对用, 与 PHREEQC 无任何共用)
+# --------------------------------------------------------------------------
+import importlib.util
+def _load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+_analytic = _load("_khbco3_pH_analytic", os.path.join(HERE, "khbco3_pH_analytic.py"))
+_sealed   = _load("_khbco3_sealed",      os.path.join(HERE, "khbco3_sealed.py"))
 
-_sealed = _load_module("_khbco3_sealed", os.path.join(HERE, "khbco3_sealed.py"))
-_open   = _load_module("_khbco3_open",   os.path.join(HERE, "khbco3_pH_analytic.py"))
+def analytic_const(p_co2_atm, alk_kgw=0.2, k_kgw=None, nitrite=0.0, T=298.15):
+    """恒压: 规定 CO2 分压, 返回独立解析解的 pH"""
+    r = _analytic.pH_open(T, p_co2_atm, alk_kgw=alk_kgw, k_kgw=k_kgw, nitrite=nitrite)
+    return r["pH"]
 
-# PHREEQC 在输出开头回显输入的 GAS_PHASE 定义, 其中给出精确的气相分压。
-# (结果段末尾的 "CO2(g) ... Pressure X atm" 汇总行只有 2 位有效数字, 不可用于计算)
-GAS_ECHO = re.compile(
-    r"GAS_PHASE\s+\d+\s*\n"
-    r"\s*fixed_pressure\s*\n"
-    r"\s*pressure\s+([\d.eE+-]+)\s*\n"
-    r"\s*CO2\(g\)\s+([\d.eE+-]+)\s*\n"
-    r"\s*H2O\(g\)\s+([\d.eE+-]+)", re.M)
+def analytic_sealed(P0_co2_atm, r=RATIO, alk_kgw=0.2, k_kgw=None, nitrite=0.0):
+    """定容: 初始充 CO2 至 P0, 返回 (pH, P_eq)"""
+    return _sealed.solve(P0_co2_atm, r, alk_kgw=alk_kgw, k_kgw=k_kgw, nitrite=nitrite)
 
-def parse_file(path):
-    """解析一个 PHREEQC 输出文件, 返回算例列表"""
-    txt = open(path, encoding="utf-8", errors="ignore").read()
-    echoes = GAS_ECHO.findall(txt)
-    parts = re.split(r"Initial solution (\d+)\.", txt)
-    out = []
-    for i in range(1, len(parts), 2):
-        b = parts[i+1]
-        d = {}
-        for k, pat in SPEC:
-            m = re.findall(pat, b, re.M)
-            if m:
-                d[k] = (float(m[-1][0]), float(m[-1][1]))
-        ph = re.findall(r"([\d.]+)\s+Charge balance", b)
-        tt = re.findall(r"Total CO2 \(mol/kg\)\s+=\s+([\d.eE+-]+)", b)
-        if ph and d:
-            d["pH"]   = float(ph[-1])
-            d["TOT"]  = float(tt[-1]) if tt else None
-            j = len(out)
-            if j < len(echoes):
-                p_tot, p_co2, p_h2o = (float(x) for x in echoes[j])
-                d["pTotal"] = p_tot
-                d["pCO2"]   = p_co2
-                d["pH2O"]   = p_h2o
-            else:
-                d["pTotal"] = d["pCO2"] = d["pH2O"] = 0.0
-            out.append(enrich(d))
-    return out
+def dik_at(cases, p_co2_atm):
+    """由一组 Case 插值得到 DIC(p) (mol/kg water)"""
+    xs = [c.p_co2_atm for c in cases]
+    ys = [c.totals["C"] for c in cases]
+    if p_co2_atm <= xs[0]:  return ys[0]
+    if p_co2_atm >= xs[-1]: return ys[-1]
+    for i in range(len(xs)-1):
+        if xs[i] <= p_co2_atm <= xs[i+1]:
+            f = (p_co2_atm-xs[i])/(xs[i+1]-xs[i])
+            return ys[i] + f*(ys[i+1]-ys[i])
 
-def enrich(d):
-    # H2CO3 已由 PHREEQC 并入表观物种 CO2*, 此处仅作拆分比例参考
-    d["H2"] = d["CO2"][0]*KH
-    # 总无机碳 = 物种和 (含 (CO2)2 的两个碳)。不用 PHREEQC 打印的 "Total CO2",
-    # 因其只有 4 位有效数字; 两者在 1e-5 量级上一致。
-    d["DIC"] = d["CO2"][0]+d["H1"][0]+d["H3"][0]+d["KH"][0]+2*d["D2"][0]
-    d["Alk"] = d["H1"][0]+2*d["H3"][0]+d["OH"][0]-d["H"][0]
-    return d
+def solve_sealed_p_eq(cases, P0_co2_atm, ratio=RATIO, c_init=0.2):
+    """由容器碳守恒解出平衡 CO2 分压 (atm)"""
+    lo, hi = 1e-9, P0_co2_atm
+    for _ in range(200):
+        mid = 0.5*(lo+hi)
+        f = dik_at(cases, mid) - c_init - (P0_co2_atm - mid)*ratio/R_GAS
+        f0 = dik_at(cases, lo) - c_init - (P0_co2_atm - lo)*ratio/R_GAS
+        if f0*f <= 0: hi = mid
+        else:        lo = mid
+    return 0.5*(lo+hi)
 
-def recon(d, Ka1a, Ka2):
-    """分析化学校验: 给定 pH 与总碳, 按碳酸平衡式与活度系数反算各组分浓度"""
-    aH = d["H"][1]
-    g1 = 10**math.log10(d["H1"][1]/d["H1"][0])
-    g0 = 10**math.log10(d["CO2"][1]/d["CO2"][0])
-    g2 = 10**math.log10(d["H3"][1]/d["H3"][0])
-    CT = d["CO2"][0]+d["H1"][0]+d["H3"][0]
-    lo, hi = 1e-8, 0.5
-    for _ in range(300):
-        mid = (lo+hi)/2
-        f = (aH*mid/Ka1a)/g0 + mid/g1 + (Ka2*mid/aH)/g2 - CT
-        if f < 0: lo = mid
-        else:     hi = mid
-    ah = (lo+hi)/2
-    return (aH*ah/Ka1a)/g0, ah/g1, (Ka2*ah/aH)/g2
-
-def analytic_const(P_atm):
-    """独立解析解: 指定气相 CO2 分压 (恒压 / 指定平衡压力)"""
-    return _open.pH_open(298.15, P_atm*0.101325, True, True)["pH"]
-
-def analytic_sealed(P0_atm):
-    """独立解析解: 定容反应器, 由充气压力解出平衡分压 (含容器碳守恒)"""
-    r = _sealed.solve(P0_atm, RATIO)
-    return r[0] if isinstance(r, tuple) else r
-
-def load_final():
-    """13 个正式算例 -> (组1 恒压, 组2 定容-充气, 组3 定容-平衡)"""
-    S = parse_file(os.path.join(OUT, "final2_out.txt"))
-    if len(S) < 13:
-        raise RuntimeError("final2_out.txt 算例数不足: %d" % len(S))
-    grp1 = [S[0]]
-    grp2 = [S[7+k] for k in range(6)]
-    grp3 = list(S[1:7])
-    # 组3 的 2.00 MPa 一档采用与亨利+PR 逸度修正相符的分支 (见 README 已知注意事项)
-    hf = parse_file(os.path.join(OUT, "hp_fine_out.txt"))
-    stable = [x for x in hf if abs(x["pCO2"]-20.70) < 0.02]
-    if not stable:
-        raise RuntimeError("hp_fine_out.txt 中找不到 20.70 atm 算例")
-    grp3[5] = stable[0]
-    return grp1, grp2, grp3
 
 if __name__ == "__main__":
-    g1, g2, g3 = load_final()
-    for nm, cs, gau in [("组1 恒压", g1, [0.0]), ("组2 定容-充气", g2, GAUGE),
-                        ("组3 定容-平衡", g3, GAUGE)]:
-        print("=== %s ===" % nm)
-        for g, d in zip(gau, cs):
-            pHan = analytic_const(ABS[g]) if nm != "组2 定容-充气" else analytic_sealed(ABS[g])
-            print("  表压 %4.2f MPa | 绝对 %7.3f atm | pCO2 %6.3f | pH %6.3f | 解析 %6.3f | d=%+.3f"
-                  % (g, ABS[g], d["pCO2"], d["pH"], pHan, d["pH"]-pHan))
+    for c in load_case("equilibrium_co2.tsv"):
+        s = c.summary()
+        print("  表压 %4.2f | 绝对 %6.4f MPa | pCO2 %9.6f atm | pH %8.5f | Alk %.5f | I %.5f | DIC %.5f M"
+              % (s["gauge"], s["p_abs"], s["p_co2"], s["pH"], s["Alk"], s["I"], s["DIC"]))
+
+# --------------------------------------------------------------------------
+# 内部一致性核对
+# --------------------------------------------------------------------------
+def ionic_strength_from_species(case):
+    """由各物种的电荷数与浓度算离子强度 (mol/kg water), 用于与 PHREEQC 报告的 mu 互校"""
+    # 离子强度只计带电物种: 游离 K+ = 总 K - 中性络合物 KHCO3 中的 K
+    k_free = case.totals["K"] - case.m["KHCO3"]
+    return 0.5*(k_free + case.m["H+"] + case.m["OH-"] + case.m["HCO3-"]
+                + 4*case.m["CO3-2"] + case.m["NtiO2-"])
