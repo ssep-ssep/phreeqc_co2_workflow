@@ -95,6 +95,8 @@ def main():
         run_phreeqc(exe, "equilibrium_co2.pqi", "equilibrium_co2.out", "equilibrium_co2.tsv")
         run_phreeqc(exe, "equilibrium_co2_kno2.pqi", "equilibrium_co2_kno2.out",
                  "equilibrium_co2_kno2.tsv")
+        run_phreeqc(exe, "equilibrium_co2_realno2.pqi", "equilibrium_co2_realno2.out",
+                 "equilibrium_co2_realno2.tsv")
     else:
         print("\n[2/4] 跳过 PHREEQC, 使用 output/ 中已有结果")
 

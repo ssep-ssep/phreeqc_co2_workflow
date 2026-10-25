@@ -62,7 +62,8 @@ phreeqc_co2_workflow/
 │   └── build_phreeqc.sh    Linux 自行编译脚本
 ├── input/
 │   ├── equilibrium_co2.pqi        主线：7 个表压档，规定平衡 CO₂ 分压
-│   ├── equilibrium_co2_kno2.pqi   同上 + 20 mM KNO₂ 变体
+│   ├── equilibrium_co2_kno2.pqi   同上 + 20 mM KNO₂ 变体 (Nti 独立组分)
+│   ├── equilibrium_co2_realno2.pqi 对照：直接用数据库真 NO₂⁻（见 §7）
 │   └── sealed_charge.pqi          对照：定容充气压力（由 run_all.py 生成）
 ├── output/                 PHREEQC 输出（运行后生成）
 └── src/
@@ -145,6 +146,7 @@ KNO₂ 敏感性（20 mM）：ΔpH = −0.0042（各压力档相同），对应 
 | E | **与独立解析解交叉核对**（Davies + Peng-Robinson，与 PHREEQC 无共用）| \|ΔpH\| ≤ 0.02（实测 ≤ 0.0159）|
 | F | 内部一致性：离子强度两种算法互校 | ≤ 1×10⁻⁶ |
 | G | 定容对照的容器碳守恒；KNO₂ 敏感性 | ≤ 1×10⁻⁵ mol/kg（实测 ≤ 3×10⁻⁷）；\|ΔpH\| ≤ 0.01 |
+| **H** | **NO₂⁻ 路线独立验证**（见 §7） | Nti 质量守恒、碱度含 HNtiO₂、电荷与碳守恒、与独立解析解交叉核对 \|ΔpH\| ≤ 0.02（实测 0.0185）、质子化常数反算 log K = 3.16±0.01、NtiO₂⁻ 活度系数 = 数据库 NO₂⁻（差 ≤ 0.05%）|
 
 **E 组是真正的独立交叉核对**（独立程序不使用 PHREEQC 的任何输出）；
 其余各组是对同一份 PHREEQC 输出的内部一致性检查，不应被当作独立验证。
@@ -176,7 +178,34 @@ Alk = [HCO₃⁻] + 2[CO₃²⁻] + [KHCO₃⁰] + [OH⁻] − [H⁺]（加入 H
 CO2(g) ... Pressure 20.7 atm，只有 2 位有效数字。精确值在输出开头的输入回显段；
 本包统一读 `SELECTED_OUTPUT -high_precision` 生成的 TSV。
 
-**（6）不要用手写的 git 对象推送。** 树条目须按“目录名带斜杠”的规则排序，
+**（6）亚硝酸盐必须用独立组分 Nti，不能直接用数据库的 NO₂⁻。**
+直接写 §N(+3) 0.02§ 时，PHREEQC 的初始解会做氧化还原平衡，把氮拆散：
+
+| 价态 | 总量 | 实际物种 |
+|---|---|---|
+| N(−3) | 0 | — |
+| N(0) | 8.17×10⁻³ | N₂ = 4.09×10⁻³ |
+| **N(3)** | **7.84×10⁻¹³** | **NO₂⁻ ≈ 0（几乎全被消耗）** |
+| N(5) | 1.23×10⁻² | NO₃⁻ = 1.23×10⁻² |
+
+亚硝酸盐被歧化掉了。本包用独立组分 §Nti§ 规避：§NtiO2⁻§ 继承数据库 NO₂⁻ 的活度与体积参数
+（§-gamma 3 0§、§-Vm 5.5864 5.859 3.3472 -3.0212 1.1847§），另加 §HNtiO2§ 的质子化平衡
+（log K = 3.16）。该 pKa 取自 da Silva Gabriel, Kennedy E M, Dlugogorski B Z (2006)
+*Ab Initio Procedure for Aqueous-Phase pKa Calculation: The Acidity of Nitrous Acid*,
+J. Phys. Chem. A **110**, 11371–11376, doi:10.1021/jp0639243。
+
+已验证 Nti 路线的正确性（§verify_results.py§ 的 H 组，共 42 项）：
+
+- Nti 质量守恒（偏差 ≤ 1×10⁻¹⁴ mol）
+- 碱度 = 完整物种求和（**含 −[HNtiO₂]**），与 PHREEQC 报告值吻合到 ≤1×10⁻⁹ eq/kg
+- 电荷平衡 ≤ 1×10⁻¹¹；碳质量守恒 ≤ 1×10⁻¹³ mol
+- 与**独立解析解**（含亚硝酸盐项）交叉核对：最大 \|ΔpH\| = 0.0185
+- 由 PHREEQC 自己的活度反算 HNO₂ 质子化常数：log K = 3.1600（1 atm）～3.1690（2 MPa）；
+  高压端的漂移来自 PHREEQC 对 log K 的压力修正（HNtiO₂ 未给独立 Vm），非计算错误
+- **NtiO₂⁻ 的活度系数与数据库真 NO₂⁻ 逐点相差仅 0.00%–0.05%**（§input/equilibrium_co2_realno2.pqi§ 对照算例），
+  说明替代物与数据库物种的活度模型完全一致
+
+**（7）不要用手写的 git 对象推送。** 树条目须按“目录名带斜杠”的规则排序，
 否则 GitHub 的 fsck 会以 treeNotSorted 拒收。
 
 ---

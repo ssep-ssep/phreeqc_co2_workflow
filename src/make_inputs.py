@@ -8,6 +8,7 @@
 import os, math, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+NL = chr(10)
 PKG  = os.path.dirname(HERE)
 IN   = os.path.join(PKG, "input")
 
@@ -82,6 +83,18 @@ END
            lg=math.log10(pco2), gm=GAS_MOLES))
     return "\n".join(L)
 
+def write_realno2():
+    """对照算例: 用数据库真正的 NO2- (不用 Nti 替代物),
+    用于检验 Nti 路线的活度模型是否与数据库物种等价"""
+    cases = []
+    for g in GAUGE:
+        cases.append(("gauge=%g MPa realNO2" % g, g, p_co2_atm(g)))
+    body = build_cases(cases, "equilibrium_co2_realno2.tsv")
+    body = body.replace("{k}", "0.22").replace("{nit}", "    N(+3) 0.02" + NL)
+    open(os.path.join(IN, "equilibrium_co2_realno2.pqi"), "w",
+         encoding="utf-8", newline=chr(10)).write(body)
+
+
 def write_main():
     cases = []
     for g in GAUGE:
@@ -103,6 +116,7 @@ if __name__ == "__main__":
     os.makedirs(IN, exist_ok=True)
     write_main()
     write_kno2()
+    write_realno2()
     print("已生成:")
     for f in sorted(os.listdir(IN)):
         print("   input/%-32s %6d B" % (f, os.path.getsize(os.path.join(IN, f))))

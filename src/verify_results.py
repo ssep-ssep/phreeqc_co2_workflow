@@ -11,7 +11,7 @@ verify_results.py —— 对 PHREEQC 结果做全面交叉核对
   F 内部自洽    recon_internal: 同一份输出内部的代数自洽 (不是独立预测)
   G 对照工况    定容充气压力的容器碳守恒; KNO2 敏感性
 """
-import os, sys, math, subprocess
+import os, sys, math, re, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -33,6 +33,36 @@ def hdr(t):
 def out_text(name):
     p = os.path.join(M.OUT, name)
     return open(p, encoding="utf-8", errors="ignore").read() if os.path.exists(p) else ""
+
+def _species_gammas(path, *species):
+    """从 .out 的物种分布表读出各物种的活度系数。
+    返回: 每个解算例一个 {物种名: gamma} 字典 (只收 molality > 0 的物种)"""
+    if not os.path.exists(path):
+        return None
+    txt = open(path, encoding="utf-8", errors="ignore").read()
+    parts = re.split(r"Initial solution (\d+)\.", txt)
+    out = []
+    for i in range(1, len(parts), 2):
+        b = parts[i+1]
+        j = b.rfind("Distribution of species")
+        if j < 0:
+            continue
+        blk = b[j:j+4000]
+        d = {}
+        for l in blk.splitlines():
+            m = re.match(r"^\s+(\S+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)", l)
+            if not m:
+                continue
+            name = m.group(1)
+            if name not in species:
+                continue
+            mol, act = float(m.group(2)), float(m.group(3))
+            if mol <= 0:
+                continue
+            d.setdefault(name, act/mol)
+        if d:
+            out.append(d)
+    return out or None
 
 def main():
     print("="*90)
@@ -135,6 +165,65 @@ def main():
                   "无盐 %.4f / 有盐 %.4f (d=%+.4f, dE=%.2f mV)"
                   % (c.pH, k.pH, dk, 59.16*dk))
         print("  KNO2 影响: 最大 |ΔpH| = %.4f (对应 %.2f mV)" % (worst_k, 59.16*worst_k))
+
+    # ---------------- H  NO2- (KNO2) 路线的独立验证 ----------------
+    hdr("H) NO2- (KNO2) 路线的独立验证")
+    kpath = os.path.join(M.OUT, "equilibrium_co2_kno2.tsv")
+    if os.path.exists(kpath):
+        kc = M.load_case("equilibrium_co2_kno2.tsv")
+        kinit = M.load_initial("equilibrium_co2_kno2.tsv")
+        for c, r0 in zip(kc, kinit):
+            dN = c.totals["Nti"]*c.mass_H2O - float(r0["Nti"])*float(r0["mass_H2O"])
+            check("H 表压 %.2f MPa: Nti 质量守恒" % c.gauge_mpa, abs(dN) <= 1e-9,
+                  "偏差 %.2e mol" % dN)
+        for c in kc:
+            check("H 表压 %.2f MPa: 碱度 = 完整物种求和(含 HNtiO2)" % c.gauge_mpa,
+                  abs(c.alk_species()-c.Alk) <= 1e-9,
+                  "Alk %.6f / 物种求和 %.6f eq/kg" % (c.Alk, c.alk_species()))
+        for c in kc:
+            check("H 表压 %.2f MPa: 电荷平衡" % c.gauge_mpa, abs(c.pct_err) <= 1e-6,
+                  "percent_error = %.2e" % c.pct_err)
+        for c, r0 in zip(kc, kinit):
+            dC = c.totals["C"]*c.mass_H2O - float(r0["C"])*float(r0["mass_H2O"]) + c.gas_dCO2
+            check("H 表压 %.2f MPa: 碳质量守恒" % c.gauge_mpa, abs(dC) <= 1e-8,
+                  "偏差 %.2e mol" % dC)
+        worst_kn = 0.0
+        for c in kc:
+            pH_an = M.analytic_const(c.p_co2_atm, alk_kgw=c.Alk, k_kgw=c.totals["K"],
+                                      nitrite=c.totals["Nti"])
+            d = c.pH - pH_an
+            worst_kn = max(worst_kn, abs(d))
+            check("H 表压 %.2f MPa: pH 与独立解析解(含亚硝酸盐)" % c.gauge_mpa,
+                  abs(d) <= 0.02, "PHREEQC %.4f / 解析 %.4f (d=%+.4f)" % (c.pH, pH_an, d))
+        print("  含盐路线的最大 |dpH| = %.4f" % worst_kn)
+        gam = _species_gammas(os.path.join(M.OUT, "equilibrium_co2_kno2.out"),
+                              "NtiO2-", "HNtiO2")
+        if gam:
+            for c, gd in zip(kc, gam):
+                g_no2 = gd.get("NtiO2-", 1.0); g_hn = gd.get("HNtiO2", 1.0)
+                aH = 10**(-c.pH)
+                K = (c.m["HNtiO2"]*g_hn)/(c.m["NtiO2-"]*g_no2*aH)
+                # 容差 3%: PHREEQC 会对 log K 作压力修正 (HNtiO2 未给独立 Vm),
+                # 2 MPa 下 log K 由 3.1600 漂到约 3.169
+                check("H 表压 %.2f MPa: HNO2 质子化常数 = 10^3.16" % c.gauge_mpa,
+                      abs(K/10**3.16 - 1) <= 0.03,
+                      "反算 log K = %.4f (设定 3.1600, 差值为 PHREEQC 的压力修正); gamma(NO2-)=%.4f gamma(HNtiO2)=%.4f"
+                      % (math.log10(K), g_no2, g_hn))
+        else:
+            check("H 亚硝酸盐活度可从输出读出", False, "未能在 .out 中定位活度行")
+        real = _species_gammas(os.path.join(M.OUT, "equilibrium_co2_realno2.out"), "NO2-")
+        if real and gam:
+            for i, (gr, gd) in enumerate(zip(real, gam)):
+                gn = gd.get("NtiO2-", 1.0); grr = gr.get("NO2-", 1.0)
+                d = abs(grr-gn)/gn
+                check("H 表压 %.2f MPa: NtiO2- 活度系数 = 数据库 NO2-" % kc[i].gauge_mpa,
+                      d <= 0.01, "真 NO2- %.4f vs NtiO2- %.4f (差 %.2f%%)"
+                      % (grr, gn, 100*d))
+        else:
+            check("H 真 NO2- 对照算例可用", False,
+                  "缺少 output/equilibrium_co2_realno2.out")
+    else:
+        check("H KNO2 输出存在", False, "缺少 output/equilibrium_co2_kno2.tsv")
 
     print()
     print("="*90)
